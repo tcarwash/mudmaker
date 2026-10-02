@@ -1,0 +1,31 @@
+services:
+  mudmaker:
+    build: .
+    ports:
+      - "${MUDMAKER_BIND:-127.0.0.1}:${MUDMAKER_PORT:-8081}:8080"
+    volumes:
+      - mudmaker-data:/data
+    environment:
+      MUDMAKER_DB: /data/mudmaker.sqlite3
+      MUDMAKER_BIND: ${MUDMAKER_BIND:-127.0.0.1}
+      MUDMAKER_ADMIN_USERNAME: ${MUDMAKER_ADMIN_USERNAME:-admin}
+      MUDMAKER_ADMIN_PASSWORD: ${MUDMAKER_ADMIN_PASSWORD:-}
+      MUDMAKER_OPENAI_API_KEY: ${MUDMAKER_OPENAI_API_KEY:-}
+    restart: unless-stopped
+
+  creator-mcp:
+    build: .
+    command: ["python", "-m", "app.creator_mcp"]
+    ports:
+      - "${MUDMAKER_MCP_BIND:-127.0.0.1}:${MUDMAKER_MCP_PORT:-8082}:8001"
+    volumes:
+      - mudmaker-data:/data
+    environment:
+      MUDMAKER_DB: /data/mudmaker.sqlite3
+      MUDMAKER_MCP_TOKEN: ${MUDMAKER_MCP_TOKEN:-}
+      MUDMAKER_MCP_ALLOWED_HOSTS: ${MUDMAKER_MCP_ALLOWED_HOSTS:-}
+      MUDMAKER_OPENAI_API_KEY: ${MUDMAKER_OPENAI_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  mudmaker-data:

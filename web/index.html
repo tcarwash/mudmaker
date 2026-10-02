@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mudmaker — World Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">M</div><div><b>MUDMAKER</b><small>WORLD STUDIO</small></div></div>
+    <div class="workspace-label">WORKSPACE</div>
+    <button class="world-switch" id="world-switch" aria-label="Switch or create realm" title="Switch or create realm"><span class="world-icon">✦</span><span id="world-name-nav">Loading realm…</span><span class="chevron">⌄</span></button>
+    <div class="nav-label">BUILD</div>
+    <nav id="main-nav">
+      <button class="nav-item active" data-view="overview"><span class="nav-icon">◫</span> Overview</button>
+      <button class="nav-item" data-view="map"><span class="nav-icon">▦</span> World map <em id="map-size-nav"></em></button>
+      <button class="nav-item" data-view="npcs"><span class="nav-icon">♟</span> Characters <em id="npc-count-nav"></em></button>
+      <button class="nav-item" data-view="quests"><span class="nav-icon">⚑</span> Quests</button>
+      <button class="nav-item" data-view="crafting"><span class="nav-icon">⛏</span> Crafting</button>
+      <button class="nav-item" data-view="economy"><span class="nav-icon">◈</span> Economy</button>
+      <button class="nav-item" data-view="entities"><span class="nav-icon">✳</span> Other entities</button>
+      <button class="nav-item" data-view="customize"><span class="nav-icon">🎨</span> Style & plugins</button>
+      <button class="nav-item" data-view="playtest"><span class="nav-icon">▷</span> Playtest</button>
+      <button class="nav-item" data-view="access"><span class="nav-icon">⌘</span> SSH access</button>
+    </nav>
+    <div class="sidebar-bottom"><div class="ai-card"><div class="ai-orb">✳</div><b>Storysmith AI</b><p>Give any rough idea a shape. Complete characters, quests, items, places, and more.</p><button class="text-button" id="open-ai">Configure model <span>↗</span></button></div><div class="user-chip"><div class="avatar">W</div><div><b>World builder</b><small>Local workspace</small></div><span class="dots">···</span></div></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="breadcrumbs"><span>REALMS</span><span class="slash">/</span><b id="crumb">OVERVIEW</b></div><div class="top-actions"><span class="save-status" id="save-status"><i></i> All changes saved</span><button class="icon-button" title="Settings" id="settings-shortcut">⚙</button><button class="button button-primary" id="export-btn"><span>↓</span> Export game</button></div></header>
+    <div id="view" class="view"></div>
+  </main>
+  <div class="toast" id="toast"></div>
+  <div class="modal-backdrop hidden" id="modal-backdrop"><section class="modal" id="modal"></section></div>
+  <script src="/assets/studio.js"></script>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

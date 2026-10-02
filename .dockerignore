@@ -1,0 +1,7 @@
+.venv
+.git
+__pycache__
+*.egg-info
+.env
+*.sqlite3
+node_modules
