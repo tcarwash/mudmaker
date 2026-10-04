@@ -2,14 +2,17 @@
 import copy
 import hashlib
 import json
+import os
 import re
 import time
 
 try:
     from .content import compile_world, check_effects, check_location, ENTITY_TEMPLATES, OBJECTIVE_TYPES, EFFECT_TYPES, merge_scaffold
+    from .game_engine import GameError
     from .mcp_support import server
 except ImportError:
     from content import compile_world, check_effects, check_location, ENTITY_TEMPLATES, OBJECTIVE_TYPES, EFFECT_TYPES, merge_scaffold
+    from game_engine import GameError
     from mcp_support import server
 
 
@@ -83,7 +86,7 @@ class RuntimeManagement:
             if not isinstance(entity.get('id'), str) or not entity['id'].startswith(ident + '-'):
                 raise ValueError(f'Event entity ids must begin with {ident}-')
             if entity.get('entity_type') in ('room', 'description'):
-                tile_keys = set(entity) - {'id', 'entity_type', 'name', 'description', 'location', 'biome', 'resources', 'station', 'rest', 'exits'}
+                tile_keys = set(entity) - {'id', 'entity_type', 'name', 'description', 'location', 'map_id', 'biome', 'resources', 'station', 'rest', 'exits'}
                 if tile_keys:
                     raise ValueError('Room events contain unsupported location properties')
         candidate = {'data': json.dumps(event)}
@@ -144,6 +147,41 @@ class RuntimeManagement:
         with self.engine.lock, self.engine.connect() as con:
             return [{'username': row[0], 'state': json.loads(row[1])} for row in con.execute('SELECT username,state FROM players ORDER BY username')]
 
+    def decision_traces(self, owner_id: str = '', owner_type: str = '', limit: int = 20):
+        limit=max(1,min(int(limit),100))
+        if owner_type and owner_type not in ('npc','market'): raise ValueError('owner_type must be npc or market')
+        with self.engine.connect() as con:
+            if owner_id and owner_type:
+                rows=con.execute('SELECT created_at,owner_type,owner_id,trigger,observation,candidates,selected,outcome,status,latency_ms FROM decision_traces WHERE owner_type=? AND owner_id=? ORDER BY created_at DESC LIMIT ?', (owner_type,owner_id,limit))
+            elif owner_id:
+                rows=con.execute('SELECT created_at,owner_type,owner_id,trigger,observation,candidates,selected,outcome,status,latency_ms FROM decision_traces WHERE owner_id=? ORDER BY created_at DESC LIMIT ?', (owner_id,limit))
+            elif owner_type:
+                rows=con.execute('SELECT created_at,owner_type,owner_id,trigger,observation,candidates,selected,outcome,status,latency_ms FROM decision_traces WHERE owner_type=? ORDER BY created_at DESC LIMIT ?', (owner_type,limit))
+            else:
+                rows=con.execute('SELECT created_at,owner_type,owner_id,trigger,observation,candidates,selected,outcome,status,latency_ms FROM decision_traces ORDER BY created_at DESC LIMIT ?', (limit,))
+            return [{'created_at':r[0],'owner_type':r[1],'owner_id':r[2],'trigger':r[3],'observation':json.loads(r[4]),'candidates':json.loads(r[5]),'selected':r[6],'outcome':r[7],'status':r[8],'latency_ms':r[9]} for r in rows]
+
+    def decision_controller(self, owner_id: str, owner_type: str):
+        if owner_type not in ('npc','market'): raise ValueError('owner_type must be npc or market')
+        entries=self.engine.world.get('npcs',[]) if owner_type=='npc' else self.engine.world.get('economy',{}).get('vendors',[])
+        owner=next((entry for entry in entries if entry.get('id')==owner_id),None)
+        if not owner or not owner.get('decision_policy',{}).get('enabled'): raise ValueError('Unknown or disabled decision controller')
+        with self.engine.connect() as con:
+            state=self.engine._decision_state(con,owner_id) if owner_type=='npc' else self.engine._market_decision_state(con,owner_id)
+        policy=owner['decision_policy']; profile=next((p for p in self.engine.world.get('decision_providers',[]) if p.get('id')==policy.get('provider_id')),{})
+        result={'owner_type':owner_type,'owner_id':owner_id,'name':owner.get('name',owner_id),'enabled':True,'paused':bool(state.get('paused')),'revision':state.get('revision',0),'next_due':state.get('next_due',0),'goals':copy.deepcopy(policy.get('goals',[])),'actions':policy.get('actions',[]),'observations':policy.get('observations',[]),'triggers':policy.get('triggers',[]),'active_radius':policy.get('active_radius',8),'routes':copy.deepcopy(policy.get('routes',[])) if owner_type=='npc' else [],'fallback':policy.get('fallback','wait'),'cooldown_seconds':policy.get('cooldown_seconds',30),'timeout_seconds':policy.get('timeout_seconds',5),'memory':copy.deepcopy(state.get('memory',[])),'last_outcome':state.get('last_outcome'),'provider':{'adapter':profile.get('adapter'),'model':profile.get('model'),'endpoint_configured':bool(profile.get('endpoint_binding') and os.getenv(profile.get('endpoint_binding',''))),'credential_configured':not profile.get('credential_binding') or bool(os.getenv(profile.get('credential_binding','')))}}
+        if owner_type=='npc': result.update(location=copy.deepcopy(state.get('location') or owner.get('location')),map_id=state.get('map_id') or owner.get('map_id',self.engine.default_map_id),active_route=copy.deepcopy(state.get('route_target')),route_visits=state.get('route_visits',0))
+        else: result.update(base_prices=copy.deepcopy(state.get('base_prices',{})),paused_offers=copy.deepcopy(state.get('paused_offers',{})))
+        result['recent_traces']=self.decision_traces(owner_id,owner_type,5)
+        return result
+
+    def set_decision_controller_paused(self, owner_id: str, owner_type: str, paused: bool):
+        if type(paused) is not bool: raise ValueError('paused must be true or false')
+        operation='pause_decision_controller' if paused else 'resume_decision_controller'
+        def record(con,result): self.audit(con,operation,{'owner_id':owner_id,'owner_type':owner_type,'revision':result['revision']})
+        try: return self.engine.set_decision_paused(owner_type,owner_id,paused,audit=record)
+        except GameError as exc: raise ValueError(str(exc)) from exc
+
     def adjust_player(self, username, request_id, effects, location=None, reason=''):
         if not request_id or len(request_id) > 128 or not reason.strip():
             raise ValueError('A unique request_id and a reason are required')
@@ -154,8 +192,10 @@ class RuntimeManagement:
             if len(effects) > 50:
                 raise ValueError('At most 50 effects per request')
             if location is not None:
-                check_location(location, self.engine.world, 'teleport')
-                tile = self.engine.world['tiles'][location['y'] * self.engine.world['width'] + location['x']]
+                state_map = location.get('map_id', self.engine.default_map_id)
+                area = self.engine.map_data(state_map)
+                check_location(location, area, 'teleport')
+                tile = area['tiles'][location['y'] * area['width'] + location['x']]
                 if not self.engine.world['biomes'][tile['biome']].get('passable', True):
                     raise ValueError('Teleport destination must be passable')
             signature = digest({'username': username, 'effects': effects, 'location': location, 'reason': reason})
@@ -187,9 +227,9 @@ class RuntimeManagement:
                 if notice:
                     state.setdefault('notifications', []).append('📣 Game update: ' + ', '.join(notice) + '.')
                 if location is not None:
-                    state.update(location)
+                    state.update(map_id=location.get('map_id', state.get('map_id', self.engine.default_map_id)), x=location['x'], y=location['y'])
                     state['dialog'] = None
-                    coordinate = f"{location['x']},{location['y']}"
+                    coordinate = self.engine.location_key(state['map_id'], location['x'], location['y'])
                     if coordinate not in state['discovered']:
                         state['discovered'].append(coordinate)
                 output += self.engine.advance(state)
@@ -271,6 +311,26 @@ def create_runtime_server(manager, sessions, broadcast):
     def audit_log(limit: int = 50) -> list[dict]:
         """Read persisted management actions, grants, announcements, and event lifecycle history."""
         return manager.audit_log(limit)
+
+    @mcp.tool()
+    def decision_inspector(owner_id: str = '', owner_type: str = '', limit: int = 20) -> list[dict]:
+        """Inspect recent bounded decisions, candidates, outcomes, and timing without exposing provider credentials or raw response bodies."""
+        return manager.decision_traces(owner_id, owner_type, limit)
+
+    @mcp.tool()
+    def decision_controller(owner_id: str, owner_type: str) -> dict:
+        """Inspect one enabled NPC or market controller, including pause state, goals, memory, runtime owner state, and recent traces."""
+        return manager.decision_controller(owner_id, owner_type)
+
+    @mcp.tool()
+    def pause_decision_controller(owner_id: str, owner_type: str) -> dict:
+        """Pause an NPC or market controller. In-flight results become stale; controller state and audit history are preserved."""
+        return manager.set_decision_controller_paused(owner_id, owner_type, True)
+
+    @mcp.tool()
+    def resume_decision_controller(owner_id: str, owner_type: str) -> dict:
+        """Resume an NPC or market controller and make it eligible for its next configured trigger."""
+        return manager.set_decision_controller_paused(owner_id, owner_type, False)
 
     @mcp.resource('mudmaker://event-schema')
     def schema_resource() -> str:

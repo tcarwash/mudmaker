@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Mudmaker Adventure",
+  "short_name": "Adventure",
+  "description": "Play a shared text adventure.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#101916",
+  "theme_color": "#15231f",
+  "icons": [
+    { "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

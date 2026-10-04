@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict');
+const {merge}=require('../../web/world-merge.js');
+const base={id:'w',default_map_id:'a',width:4,height:4,tiles:[],spawn:{x:0,y:0},description:'original',maps:[{id:'a',width:4,height:4,spawn:{x:0,y:0},tiles:[{name:'',description:''},{name:'',description:''}]}],npcs:[{id:'guide',name:'Mira'}]};
+const local=structuredClone(base),server=structuredClone(base);
+local.maps[0].tiles[0].name='Local place';server.maps[0].tiles[1].name='Server place';server.description='Remote prose';
+let result=merge(base,local,server);
+assert.equal(result.conflicts.length,0);assert.equal(result.world.maps[0].tiles[0].name,'Local place');assert.equal(result.world.maps[0].tiles[1].name,'Server place');assert.equal(result.world.description,'Remote prose');assert.equal(result.world.tiles,undefined);
+server.maps[0].tiles[0].name='Remote overlap';result=merge(base,local,server);
+assert.equal(result.conflicts[0].path,'maps[a].tiles[0].name');
+assert.equal(merge(base,local,server,{'maps[a].tiles[0].name':'server'}).world.maps[0].tiles[0].name,'Remote overlap');
+local.npcs=[];server.npcs[0].name='Changed guide';result=merge(base,local,server);assert(result.conflicts.some(c=>c.path==='npcs[guide]'));assert.equal(result.world.npcs.length,0);
+local.maps[0].width=5;result=merge(base,local,server);assert(result.conflicts.some(c=>c.path==='maps[a]'));
+const extra=structuredClone(base);extra.npcs.push({id:'new',name:'New'});const other=structuredClone(base);other.npcs.push({id:'other',name:'Other'});assert.equal(merge(base,extra,other).world.npcs.length,3);
+assert.equal(base.maps[0].tiles[0].name,'');console.log('Three-way world merge regressions passed');

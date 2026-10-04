@@ -94,16 +94,48 @@ class CombatTests(unittest.TestCase):
 
     def test_bad_creature_stats_loot_and_references_fail_before_build(self):
         mutations = [
-            lambda w: w['entities'][2].update(max_hp=0),
-            lambda w: w['entities'][2].update(damage=-1),
-            lambda w: w['entities'][2].update(location={'x':999,'y':5}),
-            lambda w: w['entities'][2].update(loot=[{'item':'','count':1}]),
+            lambda w: next(e for e in w['entities'] if e.get('id') == 'moss-wolf').update(max_hp=0),
+            lambda w: next(e for e in w['entities'] if e.get('id') == 'moss-wolf').update(damage=-1),
+            lambda w: next(e for e in w['entities'] if e.get('id') == 'moss-wolf').update(location={'x':999,'y':5}),
+            lambda w: next(e for e in w['entities'] if e.get('id') == 'moss-wolf').update(loot=[{'item':'','count':1}]),
             lambda w: w['quests'][0].update(objectives=[{'type':'defeat','target':'missing'}]),
         ]
         for change in mutations:
             world = new_world(); change(world)
             with self.subTest(change=change), self.assertRaises(ContentError):
                 compile_world(world)
+
+    def test_quest_item_references_are_validated_before_build(self):
+        mutations = [
+            (lambda quest: quest.update(objectives=[{'type': 'collect', 'target': 'Missing Relic', 'count': 1}]), 'unknown item'),
+            (lambda quest: quest.update(objectives=[{'type': 'deliver', 'target': 'Missing Relic', 'npc': 'mira', 'count': 1}]), 'unknown item'),
+            (lambda quest: quest.update(reward={'currency': 0, 'items': ['Missing Relic']}), 'unknown item'),
+            (lambda quest: quest.update(reward={'currency': 0, 'items': [{'item': 'Field Notes', 'count': 0}]}), 'positive integer'),
+        ]
+        for mutate, message in mutations:
+            world = new_world()
+            mutate(world['quests'][0])
+            with self.subTest(message=message, mutation=mutate), self.assertRaisesRegex(ContentError, message):
+                compile_world(world)
+
+    def test_recipe_item_references_are_validated_before_build(self):
+        mutations = [
+            (lambda recipe: recipe['inputs'][0].update(item='Missing Ingredient'), 'unknown item'),
+            (lambda recipe: recipe['inputs'][0].update(count=0), 'positive integer'),
+            (lambda recipe: recipe['output'].update(item='Missing Product'), 'unknown item'),
+        ]
+        for mutate, message in mutations:
+            world = new_world()
+            mutate(world['crafting'][0])
+            with self.subTest(message=message, mutation=mutate), self.assertRaisesRegex(ContentError, message):
+                compile_world(world)
+
+    def test_dialogue_item_effect_requires_an_authored_item(self):
+        world = new_world()
+        dialog = next(entity for entity in world['entities'] if entity.get('entity_type') == 'dialog')
+        dialog['nodes']['greeting']['choices'][0]['effects'] = [{'type': 'item', 'item': 'Missing Relic', 'count': 1}]
+        with self.assertRaisesRegex(ContentError, 'item effect references unknown item'):
+            compile_world(world)
 
 
 if __name__ == '__main__':

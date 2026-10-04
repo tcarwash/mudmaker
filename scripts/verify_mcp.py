@@ -63,7 +63,7 @@ async def verify_creator(url, token):
         async with ClientSession(read, write) as session:
             await session.initialize()
             names = {t.name for t in (await session.list_tools()).tools}
-            assert {'edit_map', 'complete_scaffold', 'export_game', 'upsert_entity'} <= names
+            assert {'edit_map', 'complete_scaffold', 'export_game', 'upsert_entity', 'upsert_map', 'connect_maps'} <= names
             assert (await session.list_resources()).resources
             assert (await session.list_prompts()).prompts
             world = await call(session, 'get_world', {'world_id': 'starting-realm'})
@@ -74,13 +74,22 @@ async def verify_creator(url, token):
             await call(session, 'edit_map', {'world_id': 'starting-realm', 'expected_revision': initial_revision, 'tiles': [{'x': 7, 'y': 5, 'name': 'Stale edit'}]}, error=True)
             current = await call(session, 'edit_map', {'world_id': 'starting-realm', 'expected_revision': changed['revision'], 'tiles': [{'x': 7, 'y': 5, 'name': 'MCP Camp'}]})
             assert current['world']['tiles'][87]['name'] == 'MCP Camp'
+            area = await call(session, 'upsert_map', {'world_id': 'starting-realm', 'expected_revision': current['revision'], 'map_id': 'mcp-interior', 'name': 'MCP Interior', 'width': 8, 'height': 8, 'biome': 'grassland', 'spawn': {'x': 2, 'y': 3}})
+            connected = await call(session, 'connect_maps', {'world_id': 'starting-realm', 'expected_revision': area['revision'], 'source_map_id': 'overworld', 'x': 7, 'y': 5, 'exit_name': 'interior', 'destination_map_id': 'mcp-interior', 'destination_entry': 'start', 'bidirectional': True, 'return_exit_name': 'return'})
+            source_map = next(m for m in connected['world']['maps'] if m['id'] == 'overworld')
+            forward = source_map['tiles'][87]['exits']['interior']
+            destination_map = next(m for m in connected['world']['maps'] if m['id'] == 'mcp-interior')
+            reverse = destination_map['tiles'][3 * destination_map['width'] + 2]['exits']['return']
+            assert {key: forward[key] for key in ('map_id', 'x', 'y')} == {'map_id': 'mcp-interior', 'x': 2, 'y': 3}
+            assert forward['pair_id'] and forward['return_exit'] == 'return'
+            assert reverse['pair_id'] == forward['pair_id'] and reverse['return_exit'] == 'interior'
             assert (await call(session, 'validate_world', {'world_id': 'starting-realm'}))['ready']
             assert 'Welcome from MCP.' in (await call(session, 'playtest', {'world_id': 'starting-realm', 'command': 'talk mcp-keeper'}))['output']
             exported = await call(session, 'export_game', {'world_id': 'starting-realm'})
             with zipfile.ZipFile(io.BytesIO(base64.b64decode(exported['base64']))) as archive:
                 assert {'runtime_management.py', 'mcp_support.py', 'world/source.json'} <= set(archive.namelist())
                 assert token.encode() not in b''.join(archive.read(n) for n in archive.namelist())
-    print('Creator MCP discovery, resources/prompts, scaffold merge, revision conflict, map edits, playtest, export, and bearer authentication passed')
+    print('Creator MCP discovery, resources/prompts, scaffold merge, revision conflict, map edits and connections, playtest, export, and bearer authentication passed')
 
 
 async def verify_runtime(url, token, engine, announcements):

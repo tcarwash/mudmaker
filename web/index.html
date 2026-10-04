@@ -18,6 +18,7 @@
       <button class="nav-item" data-view="map"><span class="nav-icon">▦</span> World map <em id="map-size-nav"></em></button>
       <button class="nav-item" data-view="npcs"><span class="nav-icon">♟</span> Characters <em id="npc-count-nav"></em></button>
       <button class="nav-item" data-view="quests"><span class="nav-icon">⚑</span> Quests</button>
+      <button class="nav-item" data-view="dialogs"><span class="nav-icon">💬</span> Dialogue</button>
       <button class="nav-item" data-view="crafting"><span class="nav-icon">⛏</span> Crafting</button>
       <button class="nav-item" data-view="economy"><span class="nav-icon">◈</span> Economy</button>
       <button class="nav-item" data-view="entities"><span class="nav-icon">✳</span> Other entities</button>
@@ -29,11 +30,31 @@
   </aside>
   <main class="main">
     <header class="topbar"><div class="breadcrumbs"><span>REALMS</span><span class="slash">/</span><b id="crumb">OVERVIEW</b></div><div class="top-actions"><span class="save-status" id="save-status"><i></i> All changes saved</span><button class="icon-button" title="Settings" id="settings-shortcut">⚙</button><button class="button button-primary" id="export-btn"><span>↓</span> Export game</button></div></header>
+    <section id="draft-recovery" class="save-recovery" role="alert" hidden></section>
+    <section id="draft-storage-status" class="save-recovery" role="alert" hidden></section>
+    <section id="save-recovery" class="save-recovery" role="alert" hidden></section>
+    <section id="build-issues" class="save-recovery" role="region" aria-live="polite" aria-label="Build validation issues" hidden></section>
     <div id="view" class="view"></div>
   </main>
   <div class="toast" id="toast"></div>
   <div class="modal-backdrop hidden" id="modal-backdrop"><section class="modal" id="modal"></section></div>
+  <script src="/assets/map-state.js"></script>
+  <script src="/assets/location-picker.js?v=shared-picker-2"></script>
   <script src="/assets/studio.js"></script>
-  <script src="/assets/app.js"></script>
+  <script src="/assets/market-editor.js"></script>
+  <script src="/assets/map-workspace.js"></script>
+  <script src="/assets/decision-inspector.js"></script>
+  <script src="/assets/decision-goals.js"></script>
+  <script src="/assets/provider-editor.js"></script>
+  <script src="/assets/draft-recovery.js"></script>
+  <script src="/assets/world-merge.js"></script>
+  <script src="/assets/conflict-review.js"></script>
+  <script src="/assets/map-viewport.js"></script>
+  <script src="/assets/building-editor.js"></script>
+  <script src="/assets/quest-editor.js?v=typed-objectives-1"></script>
+  <script src="/assets/dialogue-editor.js?v=dialogue-flow-1"></script>
+  <script src="/assets/recipe-editor.js?v=recipe-authoring-1"></script>
+  <script src="/assets/terrain-edit.js?v=1"></script>
+  <script src="/assets/app.js?v=submap-create-2"></script>
 </body>
 </html>

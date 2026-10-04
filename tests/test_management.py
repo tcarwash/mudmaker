@@ -12,7 +12,7 @@ from app import main
 from app.creator_mcp import mutate, revision
 from app.templates.content import compile_world
 from app.templates.game_engine import GameEngine
-from app.templates.runtime_management import RuntimeManagement
+from app.templates.runtime_management import RuntimeManagement, create_runtime_server
 
 
 def fair_event():
@@ -45,6 +45,30 @@ class ManagementTests(unittest.TestCase):
         with patch.dict(os.environ, {'MUD_TEST_MCP_TOKEN': 'short'}):
             with self.assertRaises(ValueError):
                 load_token('MUD_TEST_MCP_TOKEN', path)
+
+    def test_decision_controller_management_is_owner_typed_and_audited(self):
+        policy={'enabled':True,'provider_id':'test','goals':[],'actions':['wait'],'observations':['own_state'],'triggers':['player_nearby'],'cooldown_seconds':30,'timeout_seconds':5,'fallback':'wait','memory_limit':5}
+        self.engine.world['npcs'][0]['decision_policy']=copy.deepcopy(policy)
+        summary=self.manager.decision_controller('mira','npc')
+        self.assertFalse(summary['paused'])
+        paused=self.manager.set_decision_controller_paused('mira','npc',True)
+        self.assertTrue(paused['paused'])
+        self.assertTrue(self.manager.decision_controller('mira','npc')['paused'])
+        resumed=self.manager.set_decision_controller_paused('mira','npc',False)
+        self.assertFalse(resumed['paused'])
+        actions=[row['operation'] for row in self.manager.audit_log()]
+        self.assertIn('pause_decision_controller',actions)
+        self.assertIn('resume_decision_controller',actions)
+        market=self.engine.world['economy']['vendors'][0]
+        market['decision_policy']=copy.deepcopy({**policy,'actions':['market_stock']})
+        self.assertEqual(self.manager.decision_controller(market['id'],'market')['owner_type'],'market')
+        self.assertTrue(self.manager.set_decision_controller_paused(market['id'],'market',True)['paused'])
+        self.assertFalse(self.manager.set_decision_controller_paused(market['id'],'market',False)['paused'])
+        mcp=create_runtime_server(self.manager,{},lambda message:[])
+        self.assertIn('decision_controller',[tool.name for tool in mcp._tool_manager.list_tools()])
+        self.assertIn('recent_traces',mcp._tool_manager.get_tool('decision_controller').fn(market['id'],'market'))
+        self.assertTrue(mcp._tool_manager.get_tool('pause_decision_controller').fn(market['id'],'market')['paused'])
+        self.assertFalse(mcp._tool_manager.get_tool('resume_decision_controller').fn(market['id'],'market')['paused'])
 
     def test_event_draft_activation_quest_rewards_restart_and_end(self):
         draft = self.manager.draft(fair_event())
@@ -83,7 +107,7 @@ class ManagementTests(unittest.TestCase):
         first = self.manager.adjust_player('alice', 'request-one', effects, {'x': 8, 'y': 5}, 'Event reward')
         self.assertEqual(self.manager.adjust_player('alice', 'request-one', effects, {'x': 8, 'y': 5}, 'Event reward'), first)
         self.assertEqual(self.engine.snapshot('alice')['currency'], 30)
-        self.assertIn('8,5', first['state']['discovered'])
+        self.assertIn('overworld:8,5', first['state']['discovered'])
         with self.assertRaisesRegex(ValueError, 'different operation'):
             self.manager.adjust_player('alice', 'request-one', [], reason='Different reward')
         with self.assertRaises(ValueError):

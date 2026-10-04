@@ -3,6 +3,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import socket
 import secrets
 
@@ -15,10 +16,13 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import asyncssh
 
-from app.main import make_export, new_world
+from app import main as mudmaker
+
+PROMPT = re.compile(r"\n[A-Za-z0-9_.-]+ > ")
 
 
 def free_port():
@@ -33,7 +37,7 @@ async def connect(port, username, key):
 
 async def command(process, text):
     process.stdin.write(text + "\n")
-    return (await asyncio.wait_for(process.stdout.readuntil("\n> "), 10)).replace("\r", "")
+    return (await asyncio.wait_for(process.stdout.readuntil(PROMPT), 10)).replace("\r", "")
 
 
 async def verify(port, keys, mcp_port, token):
@@ -51,7 +55,7 @@ async def verify(port, keys, mcp_port, token):
         async with bob:
             a = await alice.create_process(term_type="vt100")
             b = await bob.create_process(term_type="vt100")
-            await a.stdout.readuntil("\n> "); await b.stdout.readuntil("\n> ")
+            await asyncio.wait_for(a.stdout.readuntil(PROMPT),15); await asyncio.wait_for(b.stdout.readuntil(PROMPT),15)
             assert "alice, bob" in await command(a, "who")
             initial_map = await command(a, "map")
             assert "@ (7,5): bob (with you)" in initial_map
@@ -80,7 +84,9 @@ async def verify(port, keys, mcp_port, token):
             assert "[complete] A Wolf in the Grove" in await command(a, "quests")
             assert "XP 12" in await command(a, "stats")
             await command(a, "west"); await command(a, "west")
-            await command(a, "quests start trail-supplies")
+            assert "I will survey the roads." in await command(a, "talk mira")
+            assert "Prepare trail supplies" in await command(a, "choose 1")
+            assert "Quest accepted: Trail Supplies" in await command(a, "choose 1")
             assert "Gathered 2" in await command(a, "gather Wild Berries 2")
             await command(a, "gather Herbs")
             assert "Crafted" in await command(a, "craft trail-rations")
@@ -132,19 +138,51 @@ async def verify(port, keys, mcp_port, token):
             async with await connect(port, "alice", keys["alice"]) as conn:
                 assert "celebration has begun" in (await conn.run("talk celebration-host", check=True)).stdout
                 assert "65 Crowns" in (await conn.run("stats", check=True)).stdout
-    return "Runtime MCP event activation and idempotent grants; creature combat and rewards; discovered-only player map; SSH login binding, password rejection, multiplayer chat, biome/room compilation, custom actions, dialogue choices, quests, gathering, crafting, shared trading, and reconnect persistence passed"
+    async with await connect(port, "alice", keys["alice"]) as alice, await connect(port, "bob", keys["bob"]) as bob:
+        a=await alice.create_process(term_type="vt100"); b=await bob.create_process(term_type="vt100")
+        await asyncio.wait_for(a.stdout.readuntil(PROMPT),15); await asyncio.wait_for(b.stdout.readuntil(PROMPT),15)
+        claim=await command(a,"build claim")
+        assert "entrance is included at no extra cost" in claim
+        entrance=re.search(r"go (enter-home-[a-f0-9]+)",claim).group(1)
+        await command(a,f"go {entrance}")
+        assert "Tile added" in await command(a,"build expand east")
+        await command(a,"store Torch 1")
+        await command(a,"home access grant bob visitor")
+        await command(b,f"go {entrance}")
+        assert "owner and collaborators" in await command(b,"storage")
+        assert "collaborator access" in await command(b,"build expand east")
+        await command(a,"home access grant bob collaborator")
+        assert "Torch ×1" in await command(b,"storage")
+        await command(a,"go return")
+        a.stdin.write("quit\n"); b.stdin.write("quit\n")
+        await a.wait(); await b.wait()
+    return "Runtime MCP, multiplayer, gameplay, player-building claim/expansion/storage/access, and reconnect persistence passed"
 
 
 def main():
     keys = {user: asyncssh.generate_private_key("ssh-ed25519") for user in ("alice", "bob")}
-    source = new_world()
+    source = mudmaker.new_world()
+    mira_dialog = next(entity for entity in source["entities"] if entity.get("id") == "mira-dialog")
+    mira_dialog["nodes"]["thanks"]["choices"] = [{"text":"Prepare trail supplies for Mira.","next":"supply","requires":{"quest":"first-survey"},"effects":[{"type":"quest","target":"trail-supplies"}]}]
+    mira_dialog["nodes"]["supply"] = {"text":"Mira: Gather berries and herbs, craft Trail Rations, and bring them back.","choices":[]}
+    source.setdefault("building",{}).update(enabled=True,tile_cost=2,allow_on_services=True,allow_visitors=True,allow_collaborators=True,storage_capacity=10)
     source["ssh_public_keys"] = [{"username": user, "public_key": key.export_public_key().decode()} for user, key in keys.items()]
     port = free_port()
     mcp_port = free_port()
     token = secrets.token_urlsafe(32)
     project = "mudmaker-check-" + uuid.uuid4().hex[:8]
     with tempfile.TemporaryDirectory(prefix="mudmaker-export-") as directory:
-        with zipfile.ZipFile(io.BytesIO(make_export(source))) as archive:
+        with patch.object(mudmaker, "DB_PATH", Path(directory) / "workbench.sqlite3"):
+            mudmaker.init_db()
+            mudmaker.save_world(source)
+            saved = mudmaker.get_world(source["id"])
+            report = mudmaker.validate_build(source["id"], {"draft": saved})
+            assert report["ready"], report
+            revision = report["revision"]
+            assert revision == mudmaker.world_revision(saved)
+            archive_bytes = mudmaker.make_export(saved)
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            assert json.loads(archive.read("world/source.json")) == saved
             archive.extractall(directory)
         command_base = ["docker", "compose", "-p", project, "-f", str(Path(directory) / "compose.yaml")]
         env = {**os.environ, "MUD_SSH_PORT": str(port), "MUD_MCP_PORT": str(mcp_port), "MUD_MCP_TOKEN": token}
@@ -152,19 +190,22 @@ def main():
             subprocess.run(command_base + ["config", "--quiet"], env=env, check=True)
             subprocess.run(command_base + ["up", "-d", "--build"], env=env, check=True)
             print(asyncio.run(verify(port, keys, mcp_port, token)))
+            print(f"Verified validated saved revision {revision[:12]} in the exported archive and runtime")
             subprocess.run(command_base + ["restart"], env=env, check=True)
             async def reconnect():
                 for _ in range(50):
                     try:
                         async with await connect(port, "alice", keys["alice"]) as conn:
-                            assert "65 Crowns" in (await conn.run("stats", check=True)).stdout
+                            assert "61 Crowns" in (await conn.run("stats", check=True)).stdout
                             assert "Celebration Host" in (await conn.run("look", check=True)).stdout
+                        async with await connect(port, "bob", keys["bob"]) as bob_conn:
+                            assert "Torch ×1" in (await bob_conn.run("storage", check=True)).stdout
                             return
                     except (OSError, asyncssh.Error):
                         await asyncio.sleep(0.2)
                 raise AssertionError("Game did not recover after restart")
             asyncio.run(reconnect())
-            print("Container restart preserved player, economy, and active MCP event state")
+            print("Container restart preserved player, economy, home expansion, access grants, storage, and active MCP event state")
         except BaseException:
             subprocess.run(command_base + ["logs", "--no-color", "--tail", "60"], env=env)
             raise

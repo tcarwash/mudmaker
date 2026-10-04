@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict');
+const {mapSearchResults}=require('../../web/map-workspace.js');
+const source={default_map_id:'a',maps:[{id:'a',width:4,tiles:[{name:'Old Bridge',resources:[{item:'Herbs'}],station:'campfire'}]},{id:'b',width:4,tiles:[{}]}],npcs:[{id:'guide',name:'Mira',location:{x:0,y:0}},{id:'remote',name:'Mira',map_id:'b',location:{x:0,y:0}}],entities:[{id:'room',entity_type:'room',name:'Bridge House',map_id:'a',location:{x:1,y:0}}]};
+assert.equal(mapSearchResults(source,'a','MIRA').length,1);
+assert.equal(mapSearchResults(source,'b','mira')[0].id,'remote');
+assert.equal(mapSearchResults(source,'a','Herbs')[0].tile,0);
+assert.equal(mapSearchResults(source,'a','campfire')[0].kind,'location');
+assert.equal(mapSearchResults(source,'a','Bridge').length,2);
+assert.deepEqual(mapSearchResults(source,'a',''),[]);
+assert.deepEqual(mapSearchResults(source,'a','no match'),[]);
+console.log('Map-local search regressions passed');

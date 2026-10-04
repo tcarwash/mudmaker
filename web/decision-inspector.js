@@ -1,0 +1,18 @@
+function decisionValue(value,depth=0){
+ if(value===null||value===undefined)return '<span class="muted">None</span>';
+ if(typeof value!=='object')return esc(String(value));
+ if(depth>=4)return '<span class="muted">See advanced details</span>';
+ if(Array.isArray(value))return value.length?`<ul>${value.slice(0,24).map(item=>`<li>${decisionValue(item,depth+1)}</li>`).join('')}</ul>`:'<span class="muted">None</span>';
+ const content=`<dl class="decision-values">${Object.entries(value).slice(0,24).map(([key,item])=>`<dt>${esc(key.replaceAll('_',' '))}</dt><dd>${decisionValue(item,depth+1)}</dd>`).join('')}</dl>`;
+ return depth?`<details><summary>${Object.keys(value).length} fields</summary>${content}</details>`:content;
+}
+function renderDecisionInspector(host,result){
+ const trace=result.trace,preview=result.controller||result,observation=trace?.observation||preview.observation,owner=observation?.owner,actions=trace?.candidates||preview.candidates||[];
+ const status=trace?.status||('paused' in preview?(preview.paused?'paused':'ready'):'preview');
+ const provider=preview.provider;
+ const section=(title,body)=>`<section class="decision-section"><h4>${title}</h4>${body}</section>`;
+ host.innerHTML=`<div class="decision-summary"><strong>${esc(owner?.name||preview.owner_id||trace?.owner_id||'Controller')}</strong><span class="badge">${esc(status)}</span></div>${section('Current controller',`<p>${preview.paused?'Ⅱ Paused · manual stepping remains available':'▶ Enabled'}</p>${provider?`<p>${esc(provider.adapter||'Provider')} · ${esc(provider.model||'No model')}</p><p>${provider.endpoint_configured?'Endpoint binding configured':'⚠ Endpoint binding missing · authored fallback applies'}${provider.credential_configured?'':' · credential binding missing'}</p>`:''}${preview.cooldown_until?`<p>Next eligible decision: ${esc(new Date(preview.cooldown_until*1000).toLocaleString())}</p>`:''}${result.message?`<p>${esc(result.message)}</p>`:''}`)}${observation?section('Goals',decisionValue(observation.goals||[]))+section('Observed owner state',decisionValue(owner||{}))+section('Permitted observations',decisionValue(Object.fromEntries(Object.entries(observation).filter(([key])=>!['owner','goals'].includes(key))))):''}${section(`Eligible actions · ${actions.length}`,actions.length?`<ul class="decision-actions">${actions.map(action=>`<li ${action.id===trace?.selected?'class="decision-selected"':''}><strong>${esc(action.id)}</strong>${action.id===trace?.selected?' <span class="badge">SELECTED</span>':''}<p>${esc(action.description||action.type||'')}</p></li>`).join('')}</ul>`:'<p>Preview this controller to inspect its current actions.</p>')}${trace?section('Selection & outcome',`<p><strong>${esc(trace.selected||'None')}</strong> · ${esc(trace.status)} · ${esc(trace.latency_ms??0)} ms</p><p>${esc(trace.outcome||'No outcome recorded')}</p>`):''}${result.controller?section('State after this step',decisionValue(result.controller.observation?.owner||{})):''}<details><summary>Advanced response details</summary><pre class="terminal">${esc(JSON.stringify(result,null,2))}</pre><button class="button button-secondary" type="button" data-decision-download>Download details</button></details>`;
+ host.querySelector('[data-decision-download]').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download='decision-inspection.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+}
+
+function wireDecisionInspectorLayout(){const panel=document.querySelector('#decision-inspector-panel'),layout=document.querySelector('.playtest-layout');if(panel&&layout)layout.appendChild(panel)}

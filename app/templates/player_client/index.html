@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#15231f"><meta name="description" content="Play a shared text adventure."><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/assets/icon.svg" type="image/svg+xml"><title>Play</title>
+  <link rel="stylesheet" href="/assets/player.css">
+</head>
+<body>
+  <main class="shell">
+    <header><div><p class="eyebrow">MUDMAKER PLAYER</p><h1 id="world-name">Your adventure</h1><p id="connection-state" role="status" aria-live="polite">Connecting to game…</p></div><div class="header-actions"><button id="install-app" class="quiet" hidden>Install app</button><button id="logout" class="quiet" hidden>Leave game</button></div></header>
+    <section id="login" class="card"><h2>Join your game</h2><p>First visit: enter your invitation and choose a password. Later, sign in with that password.</p><form id="login-form"><label>Player name<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" minlength="12" required></label><label>Invitation code<input name="invitation" autocomplete="one-time-code" placeholder="First visit only"></label><button>Enter game</button></form><p id="login-error" class="error" role="alert"></p></section>
+    <section id="game" hidden>
+      <div class="status card"><strong id="player-name"></strong><span id="location"></span><span id="health"></span><span id="purse"></span></div>
+      <section id="transcript" class="card transcript" role="log" aria-live="polite" aria-relevant="additions"></section>
+      <div class="client-tools"><button id="mode-toggle" class="quiet" aria-pressed="false">Use text-only mode</button><span id="install-help" class="muted"></span></div>
+      <nav id="quick-actions" class="actions" aria-label="Quick actions"></nav>
+      <form id="command-form" class="command"><label for="command">Command</label><input id="command" name="command" autocomplete="off" placeholder="Try help, talk, gather, or shop" required><button>Send</button></form>
+    </section>
+  </main>
+  <script src="/assets/player.js" defer></script>
+</body></html>
