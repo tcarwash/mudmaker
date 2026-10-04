@@ -2,6 +2,20 @@
 
 Mudmaker is a browser based workbench for creating multiplayer text adventures. It includes a biome map painter, editable world entities, SSH public key access lists, optional invited browser play, an optional OpenAI compatible content assistant, and a self contained Docker Compose export for each game.
 
+## Screenshots
+
+The map workspace brings terrain, placed content, map connections, and location editing together:
+
+![World map editor with terrain palette, map canvas, and location inspector](docs/screenshots/world-map.png)
+
+Playtest uses the game rules shared with exported runtimes and shows player state beside the command transcript:
+
+![Realm playtest with map, player status, and command transcript](docs/screenshots/playtest.png)
+
+The map workspace adapts to narrow screens with a compact navigation rail and map controls:
+
+![Responsive map editor on a narrow mobile screen](docs/screenshots/mobile-map.png)
+
 The [game engine next steps](docs/engine-next-steps.md) include a six-ticket next implementation batch for draft recovery, map reference safety, concurrent edits, validation, deployed-world upgrades, and decision responsiveness, with module pointers and acceptance checks.
 
 The [submaps, travel, markets, and player-building plan](docs/travel-trade-and-building-plan.md) tracks implementation progress and the remaining builder, runtime, migration, and verification requirements.
