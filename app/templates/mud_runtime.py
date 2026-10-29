@@ -15,7 +15,14 @@ from game_engine import GameEngine
 from player_web import create_player_web, issue_invitation, reset_browser_account
 
 WORLD = json.loads(Path("/world/world.json").read_text())
-PLAYERS = json.loads(Path("/world/players.json").read_text())
+PLAYER_FILE = Path("/data/players.json")
+if PLAYER_FILE.exists():
+    saved_players = json.loads(PLAYER_FILE.read_text())
+    base_players = json.loads(Path("/world/players.json").read_text())
+    PLAYERS = base_players + [player for player in saved_players if player not in base_players]
+else:
+    PLAYERS = json.loads(Path("/world/players.json").read_text())
+    PLAYER_FILE.write_text(json.dumps(PLAYERS, indent=2) + "\n")
 KEYS_BY_USER = {}
 for player in PLAYERS:
     KEYS_BY_USER.setdefault(player["username"], []).append(asyncssh.import_public_key(player["public_key"]))
@@ -23,6 +30,7 @@ ENGINE = GameEngine(WORLD, "/data/game.sqlite3")
 SESSIONS = {}
 MANAGER = RuntimeManagement(ENGINE)
 ENGINE.online_players = lambda: tuple(SESSIONS)
+ENROLLMENT = WORLD.get("runtime_config", {}).get("ssh_enrollment", {})
 
 
 async def trigger_npc_decisions(username, scheduled=False):
@@ -88,7 +96,11 @@ class Server(asyncssh.SSHServer):
         return True
 
     def validate_public_key(self, username, key):
-        return key in KEYS_BY_USER.get(username, [])
+        if key in KEYS_BY_USER.get(username, []):
+            return True
+        if ENROLLMENT.get("enabled", False) and not any(p['username'].casefold() == username.casefold() for p in PLAYERS):
+            return True
+        return False
 
 
 def write(process, text):
@@ -109,6 +121,48 @@ def write(process, text):
 
 async def game_session(process):
     username = process.get_extra_info("username")
+    command = process.command or ""
+    is_copy_id = (command.startswith("exec sh -c '")
+        and 'AUTH_KEY_FILE=".ssh/authorized_keys";' in command
+        and 'cat >> "$AUTH_KEY_FILE" || exit 1;' in command)
+    enrolled = any(player["username"] == username for player in PLAYERS)
+    if is_copy_id:
+        if not ENROLLMENT.get("enabled", False):
+            write(process, "Permission denied (publickey).")
+            process.exit(1)
+            return
+        try:
+            payload = await process.stdin.read(16384)
+            if isinstance(payload, str):
+                payload = payload.encode('utf-8')
+            if not payload or len(payload) > 16384:
+                raise ValueError("No public key was submitted")
+            keys = []
+            for line in payload.decode("utf-8", "strict").splitlines():
+                line = line.strip()
+                if line:
+                    parsed = asyncssh.import_public_key(line)
+                    if parsed.export_public_key("openssh").decode().strip().split()[:2] != line.split()[:2]:
+                        raise ValueError("Invalid OpenSSH public key")
+                    keys.append(line)
+            if not keys or len(keys) > 8:
+                raise ValueError("Submit between 1 and 8 public keys")
+            for line in keys:
+                MANAGER.submit_ssh_enrollment(username, line, PLAYERS, KEYS_BY_USER,
+                    approval_required=ENROLLMENT.get("approval_required", True))
+            if ENROLLMENT.get("approval_required", True):
+                write(process, "Enrollment request received. An administrator must approve it before you can log in.")
+            else:
+                write(process, "Enrollment complete. Run ssh to connect to the game.")
+            process.exit(0)
+        except (ValueError, UnicodeError, asyncssh.Error) as exc:
+            write(process, f"Enrollment failed: {exc}")
+            process.exit(1)
+        return
+    if not enrolled:
+        write(process, "Permission denied (publickey).")
+        process.exit(1)
+        return
     if process.command:
         # SSH exec mode accepts a game command only; no shell is ever launched.
         if username in SESSIONS:
@@ -166,7 +220,7 @@ async def main():
         max_line_length=4096,
     )
     print(f"{WORLD['name']} listening on :2222; invited players: {len(KEYS_BY_USER)}", flush=True)
-    mcp = create_runtime_server(MANAGER, SESSIONS, broadcast)
+    mcp = create_runtime_server(MANAGER, SESSIONS, broadcast, PLAYERS, KEYS_BY_USER)
     token = load_token("MUD_MCP_TOKEN", "/data/runtime-mcp-token")
     http = uvicorn.Server(uvicorn.Config(BearerAuth(mcp.streamable_http_app(), token), host="0.0.0.0", port=8001, log_level="warning"))
     web_config = WORLD.get("runtime_config", {}).get("player_web", {})

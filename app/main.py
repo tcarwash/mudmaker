@@ -82,7 +82,7 @@ def new_world() -> dict[str, Any]:
             {"id": "shrug", "verb": "shrug", "broadcast": "shrugs", "icon": "🤷"},
             {"id": "dance", "verb": "dance", "broadcast": "dances", "icon": "💃"},
         ],
-        "runtime_config": {"ssh_port": 2222, "mcp_bind": "127.0.0.1", "mcp_port": 2223, "mcp_allowed_hosts": "", "player_web": {"enabled": False, "port": 8080}},
+        "runtime_config": {"ssh_port": 2222, "mcp_bind": "127.0.0.1", "mcp_port": 2223, "mcp_allowed_hosts": "", "player_web": {"enabled": False, "port": 8080}, "ssh_enrollment": {"enabled": False, "approval_required": True}},
         "npcs": [{"id": "mira", "name": "Mira the Cartographer", "role": "Guide", "location": {"x": 7, "y": 5}, "dialog": "The old paths are waking again. Will you help me map them?", "dialog_id": "mira-dialog"}],
         "quests": [
             {"id": "first-survey", "name": "A First Survey", "description": "Discover three locations for Mira.", "giver": "mira", "objectives": [{"type": "discover", "count": 3}], "reward": {"currency": 25, "items": ["Field Notes"]}},

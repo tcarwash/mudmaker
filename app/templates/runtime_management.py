@@ -34,6 +34,10 @@ class RuntimeManagement:
                     operation TEXT NOT NULL, details TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS management_requests (
                     id TEXT PRIMARY KEY, signature TEXT NOT NULL, result TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS ssh_enrollments (
+                    username TEXT NOT NULL, fingerprint TEXT NOT NULL, public_key TEXT NOT NULL,
+                    status TEXT NOT NULL, created_at REAL NOT NULL,
+                    PRIMARY KEY(username, fingerprint));
             ''')
         engine.before_command = self.refresh
         self.refresh()
@@ -147,6 +151,48 @@ class RuntimeManagement:
         with self.engine.lock, self.engine.connect() as con:
             return [{'username': row[0], 'state': json.loads(row[1])} for row in con.execute('SELECT username,state FROM players ORDER BY username')]
 
+    def ssh_enrollments(self, status='pending'):
+        with self.engine.connect() as con:
+            rows=con.execute('SELECT username,fingerprint,public_key,status,created_at FROM ssh_enrollments WHERE status=? ORDER BY created_at', (status,))
+            return [{'username':row[0],'fingerprint':row[1],'public_key':row[2],'status':row[3],'created_at':row[4]} for row in rows]
+
+    def resolve_ssh_enrollment(self, username, fingerprint, approve, players, keys_by_user):
+        with self.engine.lock, self.engine.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row=con.execute('SELECT public_key,status FROM ssh_enrollments WHERE username=? AND fingerprint=?', (username,fingerprint)).fetchone()
+            if not row or row[1] != 'pending': raise ValueError('No pending SSH enrollment matches that username and fingerprint')
+            status='approved' if approve else 'rejected'
+            con.execute('UPDATE ssh_enrollments SET status=? WHERE username=? AND fingerprint=?', (status,username,fingerprint))
+            self.audit(con, 'ssh_enrollment_'+status, {'username':username,'fingerprint':fingerprint})
+            if approve:
+                record={'username':username,'public_key':row[0]}
+                players.append(record)
+                keys_by_user.setdefault(username, []).append(__import__('asyncssh').import_public_key(row[0]))
+                with open('/data/players.json.tmp','w') as f:
+                    json.dump(players,f,indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
+                os.replace('/data/players.json.tmp','/data/players.json')
+        return {'username':username,'fingerprint':fingerprint,'status':status}
+
+    def submit_ssh_enrollment(self, username, public_key, players, keys_by_user, approval_required=True):
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,31}', username): raise ValueError('Use a 1–32 character login name')
+        import asyncssh
+        key=asyncssh.import_public_key(public_key)
+        fingerprint=key.get_fingerprint()
+        if any(p['username'].casefold()==username.casefold() and p['username']!=username for p in players):
+            raise ValueError('Player names are case-insensitive and already assigned')
+        if any(p['public_key']==public_key for p in players): raise ValueError('That SSH key is already enrolled')
+        status='pending' if approval_required else 'approved'
+        with self.engine.connect() as con:
+            con.execute('INSERT INTO ssh_enrollments VALUES (?,?,?,?,?) ON CONFLICT(username,fingerprint) DO UPDATE SET public_key=excluded.public_key,status=excluded.status,created_at=excluded.created_at', (username,fingerprint,public_key,status,time.time()))
+            self.audit(con, 'ssh_enrollment_'+status, {'username':username,'fingerprint':fingerprint})
+        if not approval_required:
+            players.append({'username':username,'public_key':public_key})
+            keys_by_user.setdefault(username,[]).append(key)
+            with open('/data/players.json.tmp','w') as f:
+                json.dump(players,f,indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
+            os.replace('/data/players.json.tmp','/data/players.json')
+        return {'username':username,'fingerprint':fingerprint,'status':status}
+
     def decision_traces(self, owner_id: str = '', owner_type: str = '', limit: int = 20):
         limit=max(1,min(int(limit),100))
         if owner_type and owner_type not in ('npc','market'): raise ValueError('owner_type must be npc or market')
@@ -244,7 +290,9 @@ class RuntimeManagement:
             return [{'sequence': row[0], 'timestamp': row[1], 'operation': row[2], 'details': json.loads(row[3])} for row in con.execute('SELECT * FROM management_audit ORDER BY sequence DESC LIMIT ?', (max(1, min(limit, 200)),))]
 
 
-def create_runtime_server(manager, sessions, broadcast):
+def create_runtime_server(manager, sessions, broadcast, players_config=None, keys_by_user=None):
+    players_config = players_config if players_config is not None else []
+    keys_by_user = keys_by_user if keys_by_user is not None else {}
     mcp = server('Mudmaker Game Master', 'Manage a running MUD. Read world_context and event_schema before creating events. Draft, review, and activate explicitly. Use unique request ids for player grants. No shell access.', 'MUD_MCP_ALLOWED_HOSTS')
 
     @mcp.tool()
@@ -266,6 +314,18 @@ def create_runtime_server(manager, sessions, broadcast):
     def list_players() -> list[dict]:
         """Inspect saved player positions, inventories, quest progress, and flags."""
         return manager.players()
+
+    @mcp.tool()
+    def list_ssh_enrollments(status: str = 'pending') -> list[dict]:
+        """Review pending SSH key enrollment requests. Status may be pending, approved, or rejected."""
+        if status not in ('pending','approved','rejected'): raise ValueError('Unknown enrollment status')
+        return manager.ssh_enrollments(status)
+
+    @mcp.tool()
+    def resolve_ssh_enrollment(username: str, fingerprint: str, approve: bool) -> dict:
+        """Approve or reject a pending ssh-copy-id request using its listed username and fingerprint."""
+        if type(approve) is not bool: raise ValueError('approve must be true or false')
+        return manager.resolve_ssh_enrollment(username,fingerprint,approve,players_config,keys_by_user)
 
     @mcp.tool()
     def complete_event_scaffold(scaffold: dict, generated: dict) -> dict:

@@ -134,7 +134,7 @@ def compile_world(source: dict) -> dict:
         {"id": "shrug", "verb": "shrug", "broadcast": "shrugs", "icon": "🤷"},
         {"id": "dance", "verb": "dance", "broadcast": "dances", "icon": "💃"},
     ])
-    runtime_defaults = {"ssh_port": 2222, "mcp_bind": "127.0.0.1", "mcp_port": 2223, "mcp_allowed_hosts": "", "player_web": {"enabled": False, "port": 8080}}
+    runtime_defaults = {"ssh_port": 2222, "mcp_bind": "127.0.0.1", "mcp_port": 2223, "mcp_allowed_hosts": "", "player_web": {"enabled": False, "port": 8080}, "ssh_enrollment": {"enabled": False, "approval_required": True}}
     runtime_config = world.setdefault("runtime_config", {})
     if isinstance(runtime_config, dict):
         for key, value in runtime_defaults.items():
@@ -561,6 +561,9 @@ def validate_runtime_world(world: dict) -> None:
         raise ContentError("runtime_config.player_web.enabled: expected true or false")
     if type(web.get("port", 8080)) is not int or not 1 <= web.get("port", 8080) <= 65535:
         raise ContentError("runtime_config.player_web.port: must be a port from 1 to 65535")
+    enrollment=config.get("ssh_enrollment", {})
+    if not isinstance(enrollment,dict) or type(enrollment.get("enabled",False)) is not bool or type(enrollment.get("approval_required",True)) is not bool:
+        raise ContentError("runtime_config.ssh_enrollment: enabled and approval_required must be true or false")
     for ident, biome in world["biomes"].items():
         if not isinstance(biome, dict) or not re.fullmatch(r"#[0-9a-fA-F]{6}", biome.get("color", "#87a982")) or not isinstance(biome.get("symbol", "+"), str) or len(biome.get("symbol", "+")) != 1:
             raise ContentError(f"biome {ident}: color needs #rrggbb and symbol needs one character")
